@@ -1,0 +1,252 @@
+cat << EOF > startup.sh
+#! /bin/bash
+apt-get update
+apt-get install -y nginx
+service nginx start
+sed -i -- 's/nginx/Google Cloud Platform - '"\$HOSTNAME"'/' /var/www/html/index.nginx-debian.html
+EOF
+
+export PROJECT_ID=$(gcloud config get-value project)
+gcloud compute project-info describe --project $PROJECT_ID
+
+gcloud compute project-info add-metadata --project $PROJECT_ID \
+    --metadata google-compute-default-region=us-east1,google-compute-default-zone=us-east1-b
+
+#Creating an instance template:
+gcloud compute instance-templates create nginx-template \
+--metadata-from-file startup-script=startup.sh \
+--region us-east1
+
+# Since startup script is not running
+gcloud compute instance-templates create nginx-template \
+  --region us-east1 \
+  --metadata=startup-script='#! /bin/bash
+      apt-get update
+      apt-get install -y nginx
+      service nginx start
+      sed -i — ‘s/nginx/Google Cloud Platform — ‘“\$HOSTNAME”’/’ /var/www/html/index.nginx-debian.html'
+
+	Created [https://www.googleapis.com/compute/v1/projects/gcp-demo-362005/global/instanceTemplates/nginx-template].
+	NAME: nginx-template
+	MACHINE_TYPE: n1-standard-1
+	PREEMPTIBLE:
+	CREATION_TIMESTAMP: 2022-11-06T07:40:16.201-08:00
+
+# gcloud compute instance-templates create web-server-template \
+#           --metadata-from-file startup-script=startup.sh \
+#           --machine-type n1-standard-1 \
+#           --region us-east1
+
+
+	Created [https://www.googleapis.com/compute/v1/projects/gcp-demo-362005/global/instanceTemplates/nginx-template].
+	NAME: nginx-template
+	MACHINE_TYPE: n1-standard-1
+	PREEMPTIBLE:
+	CREATION_TIMESTAMP: 2022-11-06T04:58:49.845-08:00
+
+# Creating a target pool:
+gcloud compute target-pools create nginx-pool --region us-east1
+
+	Created [https://www.googleapis.com/compute/v1/projects/gcp-demo-362005/regions/us-east1/targetPools/nginx-pool].
+	NAME: nginx-pool
+	REGION: us-east1
+	SESSION_AFFINITY: NONE
+	BACKUP:
+	HEALTH_CHECKS:
+
+# Creating a managed instance group:
+gcloud compute instance-groups managed create nginx-group \
+--base-instance-name nginx \
+--size 2 \
+--template nginx-template \
+--target-pool nginx-pool --zone us-east1-b
+
+	Created [https://www.googleapis.com/compute/v1/projects/gcp-demo-362005/zones/us-east1-b/instanceGroupManagers/nginx-group].
+	NAME: nginx-group
+	LOCATION: us-east1-b
+	SCOPE: zone
+	BASE_INSTANCE_NAME: nginx
+	SIZE: 0
+	TARGET_SIZE: 2
+	INSTANCE_TEMPLATE: nginx-template
+	AUTOSCALED: no
+
+gcloud compute instances list
+
+	NAME: gke-my-kubernetes-cluste-default-pool-c45f2060-bn4z
+	ZONE: us-east1-b
+	MACHINE_TYPE: n1-standard-1
+	PREEMPTIBLE:
+	INTERNAL_IP: 10.142.0.5
+	EXTERNAL_IP: 34.75.145.225
+	STATUS: RUNNING
+	
+	NAME: gke-my-kubernetes-cluste-default-pool-c45f2060-dlg9
+	ZONE: us-east1-b
+	MACHINE_TYPE: n1-standard-1
+	PREEMPTIBLE:
+	INTERNAL_IP: 10.142.0.4
+	EXTERNAL_IP: 34.23.50.223
+	STATUS: RUNNING
+	
+	NAME: gke-my-kubernetes-cluste-default-pool-c45f2060-ffjp
+	ZONE: us-east1-b
+	MACHINE_TYPE: n1-standard-1
+	PREEMPTIBLE:
+	INTERNAL_IP: 10.142.0.6
+	EXTERNAL_IP: 34.73.217.236
+	STATUS: RUNNING
+	
+	NAME: nginx-2dr4
+	ZONE: us-east1-b
+	MACHINE_TYPE: n1-standard-1
+	PREEMPTIBLE:
+	INTERNAL_IP: 10.142.0.8
+	EXTERNAL_IP: 34.75.35.164
+	STATUS: RUNNING
+	
+	NAME: nginx-q51n
+	ZONE: us-east1-b
+	MACHINE_TYPE: n1-standard-1
+	PREEMPTIBLE:
+	INTERNAL_IP: 10.142.0.7
+	EXTERNAL_IP: 34.23.138.237
+	STATUS: RUNNING
+	
+	NAME: nucleus-jumphost-952
+	ZONE: us-east1-b
+	MACHINE_TYPE: f1-micro
+	PREEMPTIBLE:
+	INTERNAL_IP: 10.142.0.2
+	EXTERNAL_IP: 34.23.2.230
+	STATUS: RUNNING
+
+# Creating a firewall rule to allow traffic (80/tcp):
+gcloud compute firewall-rules create www-firewall --allow tcp:80
+gcloud compute firewall-rules create grant-tcp-rule-437 --allow tcp:80
+
+	Creatingnfirewall...working..Created-[https://www.googleapis.com/compute/v1/projects/gcp-demo-362005/global/firewalls/www-firewall].
+	Creating firewall...done.
+	NAME: www-firewall
+	NETWORK: default
+	DIRECTION: INGRESS
+	PRIORITY: 1000
+	ALLOW: tcp:80
+	DENY:
+	DISABLED: False
+
+gcloud compute forwarding-rules create nginx-lb \
+--region us-east1 \
+--ports=80 \
+--target-pool nginx-pool
+
+	Created [https://www.googleapis.com/compute/v1/projects/gcp-demo-362005/regions/us-east1/forwardingRules/nginx-lb].
+
+gcloud compute forwarding-rules list
+
+	NAME: gke-my-kubernetes-cluster-8be525a1-f11dae41-pe
+	REGION: us-east1
+	IP_ADDRESS: 10.142.0.3
+	IP_PROTOCOL:
+	TARGET: us-east1/serviceAttachments/gke-8be525a1977f4e3ca073-7e3c-4be6-sa
+	
+	NAME: nginx-lb
+	REGION: us-east1
+	IP_ADDRESS: 34.75.60.50
+	IP_PROTOCOL: TCP
+	TARGET: us-east1/targetPools/nginx-pool
+
+# Creating a health check:
+gcloud compute http-health-checks create http-basic-check
+
+	Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-04-e71a18d8266c/global/httpHealthChecks/http-basic-check].
+	NAME: http-basic-check
+	HOST:
+	PORT: 80
+	REQUEST_PATH: /
+
+gcloud compute instance-groups managed \
+set-named-ports nginx-group \
+--named-ports http:80 --zone us-east1-b
+
+	Updated [https://www.googleapis.com/compute/v1/projects/gcp-demo-362005/zones/us-east1-b/instanceGroups/nginx-group].
+
+# Creating a backend service and attach the managed instance group:
+gcloud compute backend-services create nginx-backend \
+--protocol HTTP --http-health-checks http-basic-check --global
+
+	Created [https://www.googleapis.com/compute/v1/projects/gcp-demo-362005/global/backendServices/nginx-backend].
+	NAME: nginx-backend
+	BACKENDS:
+	PROTOCOL: HTTP
+	
+gcloud compute backend-services add-backend nginx-backend \
+--instance-group nginx-group \
+--instance-group-zone us-east1-b \
+--global
+
+	Updated [https://www.googleapis.com/compute/v1/projects/gcp-demo-362005/global/backendServices/nginx-backend].
+
+# Creating a URL map and target HTTP proxy to route requests to your URL map:
+gcloud compute url-maps create web-map \
+--default-service nginx-backend 
+
+	Created [https://www.googleapis.com/compute/v1/projects/gcp-demo-362005/global/urlMaps/web-map].
+	NAME: web-map
+	DEFAULT_SERVICE: backendServices/nginx-backend
+
+gcloud compute target-http-proxies create http-lb-proxy \
+--url-map web-map
+
+	Created [https://www.googleapis.com/compute/v1/projects/gcp-demo-362005/global/targetHttpProxies/http-lb-proxy].
+	NAME: http-lb-proxy
+	URL_MAP: web-map
+
+# Creating a forwarding rule:
+gcloud compute forwarding-rules create http-content-rule \
+--global \
+--target-http-proxy http-lb-proxy \
+--ports 80
+
+	Created [https://www.googleapis.com/compute/v1/projects/gcp-demo-362005/global/forwardingRules/http-content-rule--global].
+
+gcloud compute forwarding-rules list
+
+	NAME: http-content-rule
+	REGION:
+	IP_ADDRESS: 34.160.137.205
+	IP_PROTOCOL: TCP
+	TARGET: http-lb-proxy
+	
+	NAME: http-content-rule--global
+	REGION:
+	IP_ADDRESS: 34.160.174.251
+	IP_PROTOCOL: TCP
+	TARGET: http-lb-proxy
+	
+	NAME: nginx-lb
+	REGION: us-east1
+	IP_ADDRESS: 35.185.89.245
+	IP_PROTOCOL: TCP
+	TARGET: us-east1/targetPools/nginx-pool
+
+# Cleanup
+gcloud --quiet compute forwarding-rules delete http-content-rule --global
+gcloud --quiet compute target-http-proxies delete http-lb-proxy
+gcloud --quiet compute url-maps delete web-map -q
+gcloud --quiet compute backend-services delete nginx-backend --global
+gcloud --quiet compute http-health-checks delete http-basic-check
+gcloud --quiet compute forwarding-rules delete nginx-lb --region us-east1
+gcloud --quiet compute firewall-rules delete www-firewall
+gcloud --quiet compute instance-groups managed delete nginx-group --zone us-east1-b
+gcloud --quiet compute target-pools delete nginx-pool --region us-east1
+gcloud --quiet compute instance-templates delete nginx-template
+
+-- This is working. But, need to add region or zone wherever makes sense, otherwise it will get created in global region and that might not work for the LAB.
+https://mayankchourasia2.medium.com/getting-started-create-and-manage-cloud-resources-challenge-lab-6aade9186bdd
+
+-- THis is old code. May or may not work as it is missing few steps.
+https://github.com/GDSC-IIIT-Kalyani/qwiklabs_challenges/blob/master/Getting%20Started:%20Create%20and%20Manage%20Cloud%20Resources:%20Challenge%20Lab.md
+
+-- Haven't tried
+https://dev.to/ashutoshpipriye/getting-started-create-and-manage-cloud-resources-challenge-lab-3i70
